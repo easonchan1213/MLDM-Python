@@ -1,0 +1,150 @@
+# Human Activity Recognition Analysis -- Using R
+========================================================
+
+## Brief summary
+In this analysis, we try to apply some machine learning algorithms on the Human Activity Recognition dataset provided by Groupware. Out of 4 ML algorithms we apply, which is bagging with classification trees, neural network, logistic regression, and support vector machines, bagging with classification trees yields the highest accuracy rate, over 95%. All the model except neural network are ensembled to give a better prediction.
+
+The final outcome is pretty amazing, with 95% accuracy rate on the 20 testing data point.
+
+
+## Data preprocessing
+
+Firstly we load the data into memory.
+
+```{r}
+train <- read.csv("pml-training.csv",stringsAsFactors = FALSE)
+validation <- read.csv("pml-testing.csv")
+```
+
+Secondly we should preprocess the data, there's some blank cells, NA, NaN, and Inf. These data point actually should be 0, thus enabling us to analyze the data.
+
+```{r}
+temp <- train[,c(1:7,160)]
+temp.a <- train[,-c(1:7,160)]
+for(i in 1:ncol(temp.a)){
+        if(class(temp.a[,i])=="character"){suppressWarnings(temp.a[,i] <- as.numeric(temp.a[,i]))}
+}
+train <- cbind(temp,temp.a)
+train[is.na(train)] <- 0
+train[is.nan(unlist(train))] <- 0
+train[is.infinite(unlist(train))] <- 0
+```
+
+Not only train data, but we have to preprocess the testing data in order to have correct output
+
+```{r}
+temp <- validation[,c(1:7,160)]
+temp.a <- validation[,-c(1:7,160)]
+for(i in 1:ncol(temp.a)){
+        if(class(temp.a[,i])=="character"){temp.a[,i] <- as.numeric(temp.a[,i])}
+}
+validation <- cbind(temp,temp.a)
+validation[is.na(validation)] <- 0
+validation[is.nan(unlist(validation))] <- 0
+validation[is.infinite(unlist(validation))] <- 0
+
+```
+
+Now we can start to analyze our data.
+
+
+## Data Analysis
+
+### Step1: Split the data into training & testing data
+
+Notice that the ratio of training data to testing data is 0.2, not typical 0.75, that's because my old-fashioned Mac cannot train data on large scale.
+
+```{r}
+library(caret)
+set.seed(32323)
+inTrain <- createDataPartition(y=train$classe,
+                               p=0.2, list=FALSE)
+training <- train[inTrain,]
+testing <- train[-inTrain,]
+p <- training[,-1:-7]
+p[,1] <- as.factor(p[,1])
+```
+
+Before applying machine learning algorithms to train our model, let us first tune the cross-validation parameters. We expect our out-of-sample error to be low because 5-fold CV should take its effect and avoid overfitting.
+
+```{r}
+fitControl <- trainControl(method = "cv", 
+                           number = 5,returnResamp = "all")
+```
+
+### Step2: Train models with the training data
+
+Now we can train our model by applying some machine learning techniques, first we use "Bagging with trees".
+
+```{r}
+set.seed(32323)
+model.treebag <- train(classe~.,method="treebag",data=p,trControl=fitControl)
+result2 <- predict(model.treebag,newdata=testing)
+confusionMatrix(result2,testing$classe)
+```
+
+We can see this model gives very high accuracy rate, 96.64%. In fact this one is sufficient for predicting our testing data, but in order to improve our prediction ability, we should try some more models and mix them up.
+
+Let us apply "logistic regression with boosting". Boosting is required in order to make our model better at prediction and lower the variance.
+
+```{r}
+set.seed(32323)
+model.logit <- train(classe~.,method="LogitBoost",data=p,trControl=fitControl)
+result3 <- predict(model.logit,newdata=testing)
+confusionMatrix(result3,testing$classe)
+```
+
+This model gives 88.34% accuracy rate, a very efficient model as well.
+
+Now let's try support vector machines with boosting.
+
+```{r results='hide'}
+library(kernlab)
+set.seed(32323)
+model.svm <- suppressWarnings(train(classe~.,data=p,method='svmRadialCost',
+                   trControl = fitControl))
+result4 <- predict(model.svm,newdata=testing)
+```
+
+```{r}
+confusionMatrix(result4,testing$classe)
+```
+
+This model gives 76.34% accuracy rate.
+All models are evalued, now we turn to ensemble them.
+
+### Step3: Ensemble learning algorithm & predict
+
+```{r}
+pred1 <- predict(model.treebag,validation)
+pred2 <- predict(model.logit,validation)
+pred3 <- predict(model.svm,validation)
+ensemble <- data.frame(pred1,pred2,pred3)
+ensemble
+```
+
+Here we can see the final outcome, remember pred1 has much higher accuracy than any other predictors.
+
+This table gives the rules to pick out that final answer:
+1. If all 3 models give the same answer, that's definitely the correct answer.
+2. If not, compare the results, if two of them gives the same answer, pick that one.
+3. If all three give different answers, follow the one pred1 gives.
+
+## Results
+
+So here we get the final answers, which reportedly 95% accuracy rate on the final outcome.
+
+```{r}
+answers = c("B","A","B","A","A","E","D","B","A","A","A","C","B","A","E","E","A","B","B","B")
+pml_write_files = function(x){
+        n = length(x)
+        for(i in 1:n){
+                filename = paste0("problem_id_",i,".txt")
+                write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+        }
+}
+setwd("answer")
+pml_write_files(answers)
+```
+
+
